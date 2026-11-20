@@ -1,0 +1,69 @@
+name: Build APK
+
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+
+      - name: Unpack zip into repo root
+        run: |
+          shopt -s nullglob dotglob
+          zips=(*.zip)
+          if [ ${#zips[@]} -eq 0 ]; then
+            echo "No zip in repo root, nothing to unpack."
+            exit 0
+          fi
+          for z in "${zips[@]}"; do
+            echo "Unpacking $z"
+            tmp=$(mktemp -d)
+            unzip -q "$z" -d "$tmp"
+            rm -rf "$tmp/__MACOSX"
+            src="$tmp"
+            items=("$tmp"/*)
+            if [ ${#items[@]} -eq 1 ] && [ -d "${items[0]}" ]; then
+              src="${items[0]}"
+            fi
+            rm -rf "$src/.git" "$src/.github"
+            cp -a "$src"/. .
+            git rm -q -f -- "$z"
+          done
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Unpack project zip [skip ci]"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      - name: Set up JDK 17
+        if: hashFiles('settings.gradle.kts') != ''
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle 8.9
+        if: hashFiles('settings.gradle.kts') != ''
+        uses: gradle/actions/setup-gradle@v5
+        with:
+          gradle-version: "8.9"
+
+      - name: Build debug APK
+        if: hashFiles('settings.gradle.kts') != ''
+        run: gradle :app:assembleDebug --stacktrace
+
+      - name: Upload APK
+        if: hashFiles('settings.gradle.kts') != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: HiraganaStories-APK
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
